@@ -107,16 +107,30 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
         cursor.write_u8(address_type.value()).unwrap();
 
         // URESOURCE_ID
-        if let Some(id) = uri.resource.as_ref().and_then(|resource| resource.id) {
-            cursor.write_all(&[(id >> 8) as u8]).unwrap();
-            cursor.write_all(&[id as u8]).unwrap();
-        }
+        uri.resource
+            .as_ref()
+            .ok_or_else(|| SerializationError::new("UResource must exist to populate micro UUris"))?
+            .id_fits_micro_uri()
+            .map_err(|_| SerializationError::new("UResource id must be populated for micro UUris"))?
+            .then(|| {
+                uri.resource.as_ref().and_then(|resource| resource.id.map(|id| {
+                    cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
+                }))
+            })
+            .ok_or_else(|| SerializationError::new("UResource id larger than allotted 16 bits"))?;
 
         // UENTITY_ID
-        if let Some(id) = uri.entity.as_ref().and_then(|entity| entity.id) {
-            cursor.write_all(&[(id >> 8) as u8]).unwrap();
-            cursor.write_all(&[id as u8]).unwrap();
-        }
+        uri.entity
+            .as_ref()
+            .ok_or_else(|| SerializationError::new("UEntity must exist to populate micro UUris"))?
+            .id_fits_micro_uri()
+            .map_err(|_| SerializationError::new("UEntity id must be populated for micro UUris"))?
+            .then(|| {
+                uri.entity.as_ref().and_then(|entity| entity.id.map(|id| {
+                    cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
+                }))
+            })
+            .ok_or_else(|| SerializationError::new("UEntity id larger than allotted 16 bits"))?;
 
         // UENTITY_VERSION
         let version = uri
