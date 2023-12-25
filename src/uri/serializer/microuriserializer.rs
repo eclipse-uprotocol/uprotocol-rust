@@ -111,11 +111,18 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
             .as_ref()
             .ok_or_else(|| SerializationError::new("UResource must exist to populate micro UURIs"))?
             .id_fits_micro_uri()
-            .map_err(|e| SerializationError::new(format!("UResource id must be populated for micro UURIs: {}", e)))?
+            .map_err(|e| {
+                SerializationError::new(format!(
+                    "UResource id must be populated for micro UURIs: {}",
+                    e
+                ))
+            })?
             .then(|| {
-                uri.resource.as_ref().and_then(|resource| resource.id.map(|id| {
-                    cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
-                }))
+                uri.resource.as_ref().and_then(|resource| {
+                    resource.id.map(|id| {
+                        cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
+                    })
+                })
             })
             .ok_or_else(|| SerializationError::new("UResource id larger than allotted 16 bits"))?;
 
@@ -124,11 +131,18 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
             .as_ref()
             .ok_or_else(|| SerializationError::new("UEntity must exist to populate micro UURIs"))?
             .id_fits_micro_uri()
-            .map_err(|e| SerializationError::new(format!("UEntity id must be populated for micro UURIs: {}", e)))?
+            .map_err(|e| {
+                SerializationError::new(format!(
+                    "UEntity id must be populated for micro UURIs: {}",
+                    e
+                ))
+            })?
             .then(|| {
-                uri.entity.as_ref().and_then(|entity| entity.id.map(|id| {
-                    cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
-                }))
+                uri.entity.as_ref().and_then(|entity| {
+                    entity.id.map(|id| {
+                        cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
+                    })
+                })
             })
             .ok_or_else(|| SerializationError::new("UEntity id larger than allotted 16 bits"))?;
 
@@ -555,7 +569,10 @@ mod tests {
         };
         let uprotocol_uri = MicroUriSerializer::serialize(&uri);
         assert!(uprotocol_uri.is_err());
-        assert_eq!(uprotocol_uri.unwrap_err().to_string(), "UResource id larger than allotted 16 bits");
+        assert_eq!(
+            uprotocol_uri.unwrap_err().to_string(),
+            "UResource id larger than allotted 16 bits"
+        );
     }
 
     #[test]
@@ -574,6 +591,9 @@ mod tests {
         };
         let uprotocol_uri = MicroUriSerializer::serialize(&uri);
         assert!(uprotocol_uri.is_err());
-        assert_eq!(uprotocol_uri.unwrap_err().to_string(), "UEntity id larger than allotted 16 bits");
+        assert_eq!(
+            uprotocol_uri.unwrap_err().to_string(),
+            "UEntity id larger than allotted 16 bits"
+        );
     }
 }
