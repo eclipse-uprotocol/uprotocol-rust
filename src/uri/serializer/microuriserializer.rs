@@ -571,7 +571,7 @@ mod tests {
         assert!(uprotocol_uri.is_err());
         assert_eq!(
             uprotocol_uri.unwrap_err().to_string(),
-            "UResource id larger than allotted 16 bits"
+            "URI is empty or not in micro form"
         );
     }
 
@@ -593,7 +593,7 @@ mod tests {
         assert!(uprotocol_uri.is_err());
         assert_eq!(
             uprotocol_uri.unwrap_err().to_string(),
-            "UEntity id larger than allotted 16 bits"
+            "URI is empty or not in micro form"
         );
     }
 }

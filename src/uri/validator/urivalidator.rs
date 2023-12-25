@@ -190,15 +190,23 @@ impl UriValidator {
     /// * `uri` - The `UUri` to check.
     ///
     /// # Returns
-    /// Returns `true` if the URI contains numbers, allowing it to be serialized into micro format.
+    /// Returns `true` if the URI contains numbers which will fit in the allotted space (16 bits for
+    /// id), allowing it to be serialized into micro format.
     #[allow(clippy::missing_panics_doc)]
     pub fn is_micro_form(uri: &UUri) -> bool {
         !Self::is_empty(uri)
-            && uri.entity.as_ref().map_or(false, UEntity::has_id)
-            && uri.resource.as_ref().map_or(false, UResource::has_id)
-            && (uri.authority.is_none()
-                || UAuthority::has_ip(uri.authority.as_ref().unwrap())
-                || UAuthority::has_id(uri.authority.as_ref().unwrap()))
+            && uri
+                .entity
+                .as_ref()
+                .map_or(false, |e| e.id_fits_micro_uri().unwrap_or(false))
+            && uri
+                .resource
+                .as_ref()
+                .map_or(false, |r| r.id_fits_micro_uri().unwrap_or(false))
+            && uri
+                .authority
+                .as_ref()
+                .map_or(true, |a| UAuthority::has_ip(a) || UAuthority::has_id(a))
     }
 
     /// Checks if the URI contains names so that it can be serialized into long format.
