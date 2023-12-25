@@ -126,10 +126,13 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
             })
             .ok_or_else(|| SerializationError::new("UResource id larger than allotted 16 bits"))?;
 
-        // UENTITY_ID
-        uri.entity
+        let entity = uri
+            .entity
             .as_ref()
-            .ok_or_else(|| SerializationError::new("UEntity must exist to populate micro UURIs"))?
+            .ok_or_else(|| SerializationError::new("UEntity must exist to populate micro UURIs"))?;
+
+        // UENTITY_ID
+        entity
             .id_fits_micro_uri()
             .map_err(|e| {
                 SerializationError::new(format!(
@@ -138,21 +141,24 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
                 ))
             })?
             .then(|| {
-                uri.entity.as_ref().and_then(|entity| {
-                    entity.id.map(|id| {
-                        cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
-                    })
+                entity.id.map(|id| {
+                    cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
                 })
             })
             .ok_or_else(|| SerializationError::new("UEntity id larger than allotted 16 bits"))?;
 
         // UENTITY_VERSION
-        let version = uri
-            .entity
-            .as_ref()
-            .and_then(|entity| entity.version_major)
-            .unwrap_or(0);
-        cursor.write_u8(version as u8).unwrap();
+        entity
+            .version_fits_micro_uri()
+            .map_err(|e| {
+                SerializationError::new(format!("Major version validation failed: {}", e))
+            })?
+            .then(|| {
+                entity.version_major.map(|version| {
+                    cursor.write_u8(version as u8).unwrap();
+                })
+            })
+            .ok_or_else(|| SerializationError::new("Major version does not fit micro URI"))?;
 
         // UNUSED
         cursor.write_u8(0).unwrap();
@@ -581,6 +587,28 @@ mod tests {
             entity: Some(UEntity {
                 id: Some(0x10000),
                 version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let uprotocol_uri = MicroUriSerializer::serialize(&uri);
+        assert!(uprotocol_uri.is_err());
+        assert_eq!(
+            uprotocol_uri.unwrap_err().to_string(),
+            "URI is empty or not in micro form"
+        );
+    }
+
+    #[test]
+    fn test_serialize_version_overflow_entity_version() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(0x100),
                 ..Default::default()
             }),
             resource: Some(UResource {

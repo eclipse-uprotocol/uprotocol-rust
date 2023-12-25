@@ -194,10 +194,10 @@ impl UriValidator {
     #[allow(clippy::missing_panics_doc)]
     pub fn is_micro_form(uri: &UUri) -> bool {
         !Self::is_empty(uri)
-            && uri
-                .entity
-                .as_ref()
-                .map_or(false, |e| e.id_fits_micro_uri().unwrap_or(false))
+            && uri.entity.as_ref().map_or(false, |e| {
+                e.id_fits_micro_uri().unwrap_or(false)
+                    && e.version_fits_micro_uri().unwrap_or(false)
+            })
             && uri
                 .resource
                 .as_ref()
@@ -1105,6 +1105,24 @@ mod tests {
             entity: Some(UEntity {
                 id: Some(0x10000),
                 version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
+    }
+
+    #[test]
+    fn test_is_micro_form_version_overflow_entity_version() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(0x100),
                 ..Default::default()
             }),
             resource: Some(UResource {
