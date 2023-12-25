@@ -109,9 +109,9 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
         // URESOURCE_ID
         uri.resource
             .as_ref()
-            .ok_or_else(|| SerializationError::new("UResource must exist to populate micro UUris"))?
+            .ok_or_else(|| SerializationError::new("UResource must exist to populate micro UURIs"))?
             .id_fits_micro_uri()
-            .map_err(|_| SerializationError::new("UResource id must be populated for micro UUris"))?
+            .map_err(|e| SerializationError::new(format!("UResource id must be populated for micro UURIs: {}", e)))?
             .then(|| {
                 uri.resource.as_ref().and_then(|resource| resource.id.map(|id| {
                     cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
@@ -122,9 +122,9 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
         // UENTITY_ID
         uri.entity
             .as_ref()
-            .ok_or_else(|| SerializationError::new("UEntity must exist to populate micro UUris"))?
+            .ok_or_else(|| SerializationError::new("UEntity must exist to populate micro UURIs"))?
             .id_fits_micro_uri()
-            .map_err(|_| SerializationError::new("UEntity id must be populated for micro UUris"))?
+            .map_err(|e| SerializationError::new(format!("UEntity id must be populated for micro UURIs: {}", e)))?
             .then(|| {
                 uri.entity.as_ref().and_then(|entity| entity.id.map(|id| {
                     cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
@@ -537,5 +537,43 @@ mod tests {
         assert!(UriValidator::is_micro_form(&uri));
         assert!(UriValidator::is_micro_form(uri2.as_ref().unwrap()));
         assert_eq!(uri, uri2.unwrap());
+    }
+
+    #[test]
+    fn test_serialize_uri_overflow_resource_id() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(0x10000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let uprotocol_uri = MicroUriSerializer::serialize(&uri);
+        assert!(uprotocol_uri.is_err());
+        assert_eq!(uprotocol_uri.unwrap_err().to_string(), "UResource id larger than allotted 16 bits");
+    }
+
+    #[test]
+    fn test_serialize_uri_overflow_entity_id() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(0x10000),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let uprotocol_uri = MicroUriSerializer::serialize(&uri);
+        assert!(uprotocol_uri.is_err());
+        assert_eq!(uprotocol_uri.unwrap_err().to_string(), "UEntity id larger than allotted 16 bits");
     }
 }
