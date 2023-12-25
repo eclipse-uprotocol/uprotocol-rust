@@ -13,6 +13,19 @@
 
 use crate::uprotocol::{Remote, UAuthority};
 
+use crate::uri::validator::ValidationError;
+
+pub enum IpConformance {
+    NonConformal,
+    Ipv4,
+    Ipv6,
+}
+
+const REMOTE_IPV4_BYTES: usize = 4;
+const REMOTE_IPV6_BYTES: usize = 16;
+const REMOTE_ID_MINIMUM_BYTES: usize = 1;
+const REMOTE_ID_MAXIMUM_BYTES: usize = 255;
+
 /// Helper functions to deal with `UAuthority::Remote` structure
 impl UAuthority {
     pub fn has_name(&self) -> bool {
@@ -64,5 +77,34 @@ impl UAuthority {
     pub fn set_id(&mut self, id: Vec<u8>) -> &mut Self {
         self.remote = Some(Remote::Id(id));
         self
+    }
+
+    pub fn remote_ip_conforms(&self) -> Result<IpConformance, ValidationError> {
+        if let Some(_remote) = self.remote.as_ref() {
+            match &self.remote {
+                Some(Remote::Ip(ip)) => Ok(match ip.len() {
+                    REMOTE_IPV4_BYTES => IpConformance::Ipv4,
+                    REMOTE_IPV6_BYTES => IpConformance::Ipv6,
+                    _ => IpConformance::NonConformal,
+                }),
+                _ => Err(ValidationError::new("Remote is not IP")),
+            }
+        } else {
+            Err(ValidationError::new("No remote"))
+        }
+    }
+
+    pub fn remote_id_conforms(&self) -> Result<bool, ValidationError> {
+        if let Some(_remote) = self.remote.as_ref() {
+            match &self.remote {
+                Some(Remote::Id(id)) => Ok(match id.len() {
+                    REMOTE_ID_MINIMUM_BYTES..=REMOTE_ID_MAXIMUM_BYTES => true,
+                    _ => false,
+                }),
+                _ => Err(ValidationError::new("Remote is not ID")),
+            }
+        } else {
+            Err(ValidationError::new("No remote"))
+        }
     }
 }

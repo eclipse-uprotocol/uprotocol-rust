@@ -11,7 +11,8 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::uprotocol::{UAuthority, UUri};
+use crate::uprotocol::uauthority::IpConformance;
+use crate::uprotocol::{Remote, UAuthority, UUri};
 use crate::uri::validator::ValidationError;
 
 /// Struct to encapsulate Uri validation logic.
@@ -202,10 +203,16 @@ impl UriValidator {
                 .resource
                 .as_ref()
                 .map_or(false, |r| r.id_fits_micro_uri().unwrap_or(false))
-            && uri
-                .authority
-                .as_ref()
-                .map_or(true, |a| UAuthority::has_ip(a) || UAuthority::has_id(a))
+            && uri.authority.as_ref().map_or(true, |a| match a.remote {
+                Some(Remote::Ip(_)) => {
+                    matches!(
+                        a.remote_ip_conforms(),
+                        Ok(IpConformance::Ipv4) | Ok(IpConformance::Ipv6)
+                    )
+                }
+                Some(Remote::Id(_)) => a.remote_id_conforms().map_or(false, |conforms| conforms),
+                _ => false,
+            })
     }
 
     /// Checks if the URI contains names so that it can be serialized into long format.
@@ -1123,6 +1130,50 @@ mod tests {
             entity: Some(UEntity {
                 id: Some(29999),
                 version_major: Some(0x100),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
+    }
+
+    #[test]
+    fn test_is_micro_form_ip_incorrect_format() {
+        let uri = UUri {
+            authority: Some(UAuthority {
+                remote: Some(Remote::Ip(vec![127, 0, 0])),
+            }),
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
+    }
+
+    #[test]
+    fn test_is_micro_form_id_incorrect_format() {
+        let uri = UUri {
+            authority: Some(UAuthority {
+                remote: Some(Remote::Id(
+                    (0..=256).map(|i| (i % 256) as u8).collect::<Vec<u8>>(),
+                )),
+            }),
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(254),
                 ..Default::default()
             }),
             resource: Some(UResource {
