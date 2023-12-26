@@ -184,7 +184,86 @@ impl UriValidator {
         uri.authority.is_some() && uri.authority.as_ref().unwrap().remote.is_some()
     }
 
-    /// Checks if the URI contains numbers so that it can be serialized into micro format.
+    /// Checks if the URI contains numbers of the appropriate size so that it can be serialized into micro format.
+    ///
+    /// # Arguments
+    /// * `uri` - The `UUri` to check.
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if the URI contains numbers which will fit in the allotted space,
+    /// allowing it to be serialized into micro format.
+    ///
+    /// Otherwise returns `ValidationError` containing description of error.
+    #[allow(clippy::missing_panics_doc)]
+    pub fn validate_micro_form(uri: &UUri) -> Result<(), ValidationError> {
+        if Self::is_empty(uri) {
+            Err(ValidationError::new("URI is empty"))?;
+        }
+
+        if let Some(entity) = uri.entity.as_ref() {
+            match entity.id_fits_micro_uri() {
+                Ok(true) => (),
+                Ok(false) => Err(ValidationError::new(
+                    "Entity: ID does not fit within the 16 bits allotted",
+                ))?,
+                Err(e) => Err(ValidationError::new(format!("Entity: {}", e)))?,
+            }
+
+            match entity.version_fits_micro_uri() {
+                Ok(true) => (),
+                Ok(false) => Err(ValidationError::new(
+                    "Entity: Major version does not fit within the 8 bits allotted",
+                ))?,
+                Err(e) => Err(ValidationError::new(format!("Entity: {}", e)))?,
+            }
+        } else {
+            Err(ValidationError::new("Entity: Is missing"))?;
+        }
+
+        if let Some(resource) = uri.resource.as_ref() {
+            match resource.id_fits_micro_uri() {
+                Ok(true) => (),
+                Ok(false) => Err(ValidationError::new(
+                    "Resource: ID does not fit within the 16 bits allotted",
+                ))?,
+                Err(e) => Err(ValidationError::new(format!("Resource: {}", e)))?,
+            }
+        } else {
+            Err(ValidationError::new("Resource: Is missing"))?;
+        }
+
+        if let Some(authority) = uri.authority.as_ref() {
+            match authority.remote {
+                Some(Remote::Ip(_)) => {
+                    if !matches!(
+                        authority.remote_ip_conforms(),
+                        Ok(IpConformance::Ipv4) | Ok(IpConformance::Ipv6)
+                    ) {
+                        Err(ValidationError::new(
+                            "Authority: Remote IP does not conform to IPv4 (4 bytes) nor IPv6 standards (16 bytes)",
+                        ))?;
+                    }
+                }
+                Some(Remote::Id(_)) => {
+                    if !authority
+                        .remote_id_conforms()
+                        .map_or(false, |conforms| conforms)
+                    {
+                        Err(ValidationError::new(
+                            "Authority: Remote ID does not conform to expected length: 1-255 bytes",
+                        ))?;
+                    }
+                }
+                _ => Err(ValidationError::new(
+                    "Authority: Remote types supported are IP or ID only",
+                ))?,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Checks if the URI contains numbers of the appropriate size so that it can be serialized into micro format.
     ///
     /// # Arguments
     /// * `uri` - The `UUri` to check.
@@ -194,25 +273,7 @@ impl UriValidator {
     /// id), allowing it to be serialized into micro format.
     #[allow(clippy::missing_panics_doc)]
     pub fn is_micro_form(uri: &UUri) -> bool {
-        !Self::is_empty(uri)
-            && uri.entity.as_ref().map_or(false, |e| {
-                e.id_fits_micro_uri().unwrap_or(false)
-                    && e.version_fits_micro_uri().unwrap_or(false)
-            })
-            && uri
-                .resource
-                .as_ref()
-                .map_or(false, |r| r.id_fits_micro_uri().unwrap_or(false))
-            && uri.authority.as_ref().map_or(true, |a| match a.remote {
-                Some(Remote::Ip(_)) => {
-                    matches!(
-                        a.remote_ip_conforms(),
-                        Ok(IpConformance::Ipv4) | Ok(IpConformance::Ipv6)
-                    )
-                }
-                Some(Remote::Id(_)) => a.remote_id_conforms().map_or(false, |conforms| conforms),
-                _ => false,
-            })
+        Self::validate_micro_form(uri).is_ok()
     }
 
     /// Checks if the URI contains names so that it can be serialized into long format.
