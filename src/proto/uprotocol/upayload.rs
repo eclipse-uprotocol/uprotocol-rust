@@ -14,10 +14,66 @@
 use prost::Message;
 use prost_types::Any;
 
-use crate::{
-    cloudevent::serializer::SerializationError,
-    uprotocol::{Data, UPayload, UPayloadFormat},
-};
+pub use crate::types::serializationerror::SerializationError;
+use crate::uprotocol::{Data, UPayload, UPayloadFormat};
+
+const MIME_SUBSTYPE_JSON: &str = "json";
+const MIME_SUBTYPE_PROTOBUF: &str = "x-protobuf";
+const MIME_SUBTYPE_RAW: &str = "octet-stream";
+const MIME_SUBTYPE_SOMEIP: &str = "x-someip";
+const MIME_SUBTYPE_SOMEIP_TLV: &str = "x-someip_tlv";
+const MIME_SUBTYPE_PLAIN: &str = "plain";
+
+impl UPayloadFormat {
+    /// Gets the payload format that corresponds to a given MIME type.
+    ///
+    /// # Returns
+    ///
+    /// The corresponding payload format or [`UPayloadFormat::UpayloadFormatProtobuf`] if the MIME
+    /// type is unknown or empty.
+    pub fn from_mime_type(mime_type: &str) -> Self {
+        if let Ok(mime) = mime_type.parse::<mime::Mime>() {
+            match (mime.type_(), mime.subtype().as_str()) {
+                (mime::APPLICATION, MIME_SUBSTYPE_JSON) => UPayloadFormat::UpayloadFormatJson,
+                (mime::APPLICATION, MIME_SUBTYPE_PROTOBUF) => {
+                    UPayloadFormat::UpayloadFormatProtobuf
+                }
+                (mime::APPLICATION, MIME_SUBTYPE_RAW) => UPayloadFormat::UpayloadFormatRaw,
+                (mime::APPLICATION, MIME_SUBTYPE_SOMEIP) => UPayloadFormat::UpayloadFormatSomeip,
+                (mime::APPLICATION, MIME_SUBTYPE_SOMEIP_TLV) => {
+                    UPayloadFormat::UpayloadFormatSomeipTlv
+                }
+                (mime::TEXT, MIME_SUBTYPE_PLAIN) => UPayloadFormat::UpayloadFormatText,
+                _ => UPayloadFormat::UpayloadFormatProtobuf,
+            }
+        } else {
+            UPayloadFormat::UpayloadFormatProtobuf
+        }
+    }
+
+    /// Gets the MIME type corresponding to this payload format.
+    ///
+    /// # Returns
+    ///
+    /// The corresponding MIME type or an empty string if the payload format is [`UPayloadFormat::UpayloadFormatUnspecified`].
+    pub fn to_mime_type(&self) -> String {
+        match self {
+            UPayloadFormat::UpayloadFormatJson => mime::APPLICATION_JSON.to_string(),
+            UPayloadFormat::UpayloadFormatProtobuf => {
+                format!("{}/{}", mime::APPLICATION.as_str(), MIME_SUBTYPE_PROTOBUF)
+            }
+            UPayloadFormat::UpayloadFormatRaw => mime::APPLICATION_OCTET_STREAM.to_string(),
+            UPayloadFormat::UpayloadFormatSomeip => {
+                format!("{}/{}", mime::APPLICATION.as_str(), MIME_SUBTYPE_SOMEIP)
+            }
+            UPayloadFormat::UpayloadFormatSomeipTlv => {
+                format!("{}/{}", mime::APPLICATION.as_str(), MIME_SUBTYPE_SOMEIP_TLV)
+            }
+            UPayloadFormat::UpayloadFormatText => mime::TEXT_PLAIN.to_string(),
+            _ => String::from(""),
+        }
+    }
+}
 
 impl TryFrom<Any> for UPayload {
     type Error = SerializationError;
