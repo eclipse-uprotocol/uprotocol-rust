@@ -11,7 +11,8 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::uprotocol::{UAuthority, UEntity, UResource, UUri};
+use crate::uprotocol::uauthority::IpConformance;
+use crate::uprotocol::{Remote, UAuthority, UUri};
 use crate::uri::validator::ValidationError;
 
 /// Struct to encapsulate Uri validation logic.
@@ -120,8 +121,7 @@ impl UriValidator {
     /// Returns `true` if the URI contains both names and numeric representations of the names,
     /// meaning that this `UUri` can be serialized to long or micro formats.
     pub fn is_resolved(uri: &UUri) -> bool {
-        !Self::is_empty(uri)
-        // TODO finish this
+        UriValidator::is_micro_form(uri) && UriValidator::is_long_form(uri)
     }
 
     /// Checks if the URI is of type RPC.
@@ -184,21 +184,96 @@ impl UriValidator {
         uri.authority.is_some() && uri.authority.as_ref().unwrap().remote.is_some()
     }
 
-    /// Checks if the URI contains numbers so that it can be serialized into micro format.
+    /// Checks if the URI contains numbers of the appropriate size so that it can be serialized into micro format.
     ///
     /// # Arguments
     /// * `uri` - The `UUri` to check.
     ///
     /// # Returns
-    /// Returns `true` if the URI contains numbers, allowing it to be serialized into micro format.
+    /// Returns `Ok(())` if the URI contains numbers which will fit in the allotted space,
+    /// allowing it to be serialized into micro format.
+    ///
+    /// Otherwise returns `ValidationError` containing description of error.
+    #[allow(clippy::missing_panics_doc)]
+    pub fn validate_micro_form(uri: &UUri) -> Result<(), ValidationError> {
+        if Self::is_empty(uri) {
+            Err(ValidationError::new("URI is empty"))?;
+        }
+
+        if let Some(entity) = uri.entity.as_ref() {
+            match entity.id_fits_micro_uri() {
+                Ok(true) => (),
+                Ok(false) => Err(ValidationError::new(
+                    "Entity: ID does not fit within the 16 bits allotted",
+                ))?,
+                Err(e) => Err(ValidationError::new(format!("Entity: {}", e)))?,
+            }
+
+            match entity.version_fits_micro_uri() {
+                Ok(true) => (),
+                Ok(false) => Err(ValidationError::new(
+                    "Entity: Major version does not fit within the 8 bits allotted",
+                ))?,
+                Err(e) => Err(ValidationError::new(format!("Entity: {}", e)))?,
+            }
+        } else {
+            Err(ValidationError::new("Entity: Is missing"))?;
+        }
+
+        if let Some(resource) = uri.resource.as_ref() {
+            match resource.id_fits_micro_uri() {
+                Ok(true) => (),
+                Ok(false) => Err(ValidationError::new(
+                    "Resource: ID does not fit within the 16 bits allotted",
+                ))?,
+                Err(e) => Err(ValidationError::new(format!("Resource: {}", e)))?,
+            }
+        } else {
+            Err(ValidationError::new("Resource: Is missing"))?;
+        }
+
+        if let Some(authority) = uri.authority.as_ref() {
+            match authority.remote {
+                Some(Remote::Ip(_)) => {
+                    if !matches!(
+                        authority.remote_ip_conforms(),
+                        Ok(IpConformance::IPv4) | Ok(IpConformance::IPv6)
+                    ) {
+                        Err(ValidationError::new(
+                            "Authority: Remote IP does not conform to IPv4 (4 bytes) nor IPv6 standards (16 bytes)",
+                        ))?;
+                    }
+                }
+                Some(Remote::Id(_)) => {
+                    if !authority
+                        .remote_id_conforms()
+                        .map_or(false, |conforms| conforms)
+                    {
+                        Err(ValidationError::new(
+                            "Authority: Remote ID does not conform to expected length: 1-255 bytes",
+                        ))?;
+                    }
+                }
+                _ => Err(ValidationError::new(
+                    "Authority: Remote types supported are IP or ID only",
+                ))?,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Checks if the URI contains numbers of the appropriate size so that it can be serialized into micro format.
+    ///
+    /// # Arguments
+    /// * `uri` - The `UUri` to check.
+    ///
+    /// # Returns
+    /// Returns `true` if the URI contains numbers which will fit in the allotted space (16 bits for
+    /// id), allowing it to be serialized into micro format.
     #[allow(clippy::missing_panics_doc)]
     pub fn is_micro_form(uri: &UUri) -> bool {
-        !Self::is_empty(uri)
-            && uri.entity.as_ref().map_or(false, UEntity::has_id)
-            && uri.resource.as_ref().map_or(false, UResource::has_id)
-            && (uri.authority.is_none()
-                || UAuthority::has_ip(uri.authority.as_ref().unwrap())
-                || UAuthority::has_id(uri.authority.as_ref().unwrap()))
+        Self::validate_micro_form(uri).is_ok()
     }
 
     /// Checks if the URI contains names so that it can be serialized into long format.
@@ -1072,6 +1147,104 @@ mod tests {
             let status = UriValidator::validate_rpc_response(&uuri);
             assert!(status.is_err());
         }
+    }
+
+    #[test]
+    fn test_is_micro_form_uri_overflow_resource_id() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(0x10000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
+    }
+
+    #[test]
+    fn test_is_micro_form_uri_overflow_entity_id() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(0x10000),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
+    }
+
+    #[test]
+    fn test_is_micro_form_version_overflow_entity_version() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(0x100),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
+    }
+
+    #[test]
+    fn test_is_micro_form_ip_incorrect_format() {
+        let uri = UUri {
+            authority: Some(UAuthority {
+                remote: Some(Remote::Ip(vec![127, 0, 0])),
+            }),
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
+    }
+
+    #[test]
+    fn test_is_micro_form_id_incorrect_format() {
+        let uri = UUri {
+            authority: Some(UAuthority {
+                remote: Some(Remote::Id(
+                    (0..=256).map(|i| (i % 256) as u8).collect::<Vec<u8>>(),
+                )),
+            }),
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let is_micro_form = UriValidator::is_micro_form(&uri);
+        assert_eq!(is_micro_form, false);
     }
 
     fn get_json_object() -> Result<Value, Error> {

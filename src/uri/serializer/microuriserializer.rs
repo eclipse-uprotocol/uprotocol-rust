@@ -75,8 +75,10 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
     /// A `Vec<u8>` representing the serialized `UUri`.
     #[allow(clippy::cast_possible_truncation)]
     fn serialize(uri: &UUri) -> Result<Vec<u8>, SerializationError> {
-        if UriValidator::is_empty(uri) || !UriValidator::is_micro_form(uri) {
-            return Err(SerializationError::new("URI is empty or not in micro form"));
+        if let Err(validation_error) = UriValidator::validate_micro_form(uri) {
+            let error_message =
+                format!("Failed to validate micro URI format: {}", validation_error);
+            return Err(SerializationError::new(error_message));
         }
 
         let mut cursor = Cursor::new(Vec::new());
@@ -107,23 +109,22 @@ impl UriSerializer<Vec<u8>> for MicroUriSerializer {
         cursor.write_u8(address_type.value()).unwrap();
 
         // URESOURCE_ID
-        if let Some(id) = uri.resource.as_ref().and_then(|resource| resource.id) {
-            cursor.write_all(&[(id >> 8) as u8]).unwrap();
-            cursor.write_all(&[id as u8]).unwrap();
-        }
-
-        // UENTITY_ID
-        if let Some(id) = uri.entity.as_ref().and_then(|entity| entity.id) {
-            cursor.write_all(&[(id >> 8) as u8]).unwrap();
-            cursor.write_all(&[id as u8]).unwrap();
-        }
-
-        // UENTITY_VERSION
-        let version = uri
-            .entity
+        let id = uri
+            .resource
             .as_ref()
-            .and_then(|entity| entity.version_major)
-            .unwrap_or(0);
+            .expect("Resource validated as present")
+            .id
+            .expect("ID validated as present");
+        cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
+
+        let entity = uri.entity.as_ref().expect("Entity validated as present");
+        // UENTITY_ID
+        let id = entity.id.expect("Entity ID validated as present");
+        cursor.write_all(&[(id >> 8) as u8, id as u8]).unwrap();
+        // UENTITY_VERSION
+        let version = entity
+            .version_major
+            .expect("Entity version_major validated as present");
         cursor.write_u8(version as u8).unwrap();
 
         // UNUSED
@@ -248,7 +249,7 @@ mod tests {
         assert!(uprotocol_uri.is_err());
         assert_eq!(
             uprotocol_uri.unwrap_err().to_string(),
-            "URI is empty or not in micro form"
+            "Failed to validate micro URI format: URI is empty"
         );
     }
 
@@ -293,7 +294,7 @@ mod tests {
         assert!(uprotocol_uri.is_err());
         assert_eq!(
             uprotocol_uri.unwrap_err().to_string(),
-            "URI is empty or not in micro form"
+            "Failed to validate micro URI format: Authority: Remote types supported are IP or ID only"
         );
     }
 
@@ -311,15 +312,17 @@ mod tests {
         assert!(uprotocol_uri.is_err());
         assert_eq!(
             uprotocol_uri.unwrap_err().to_string(),
-            "URI is empty or not in micro form"
+            "Failed to validate micro URI format: Entity: Missing id"
         );
     }
 
     #[test]
-    fn test_serialize_uri_missing_resource_ids() {
+    fn test_serialize_uri_missing_resource() {
         let uri = UUri {
             entity: Some(UEntity {
                 name: "kaputt".to_string(),
+                id: Some(2999),
+                version_major: Some(1),
                 ..Default::default()
             }),
             ..Default::default()
@@ -328,7 +331,7 @@ mod tests {
         assert!(uprotocol_uri.is_err());
         assert_eq!(
             uprotocol_uri.unwrap_err().to_string(),
-            "URI is empty or not in micro form"
+            "Failed to validate micro URI format: Resource: Is missing"
         );
     }
 
@@ -492,7 +495,10 @@ mod tests {
         };
         let uprotocol_uri = MicroUriSerializer::serialize(&uri);
         assert!(uprotocol_uri.is_err());
-        assert_eq!(uprotocol_uri.unwrap_err().to_string(), "Invalid IP address");
+        assert_eq!(
+            uprotocol_uri.unwrap_err().to_string(),
+            "Failed to validate micro URI format: Authority: Remote IP does not conform to IPv4 (4 bytes) nor IPv6 standards (16 bytes)"
+        );
     }
 
     #[test]
@@ -523,5 +529,71 @@ mod tests {
         assert!(UriValidator::is_micro_form(&uri));
         assert!(UriValidator::is_micro_form(uri2.as_ref().unwrap()));
         assert_eq!(uri, uri2.unwrap());
+    }
+
+    #[test]
+    fn test_serialize_uri_overflow_resource_id() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(0x10000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let uprotocol_uri = MicroUriSerializer::serialize(&uri);
+        assert!(uprotocol_uri.is_err());
+        assert_eq!(
+            uprotocol_uri.unwrap_err().to_string(),
+            "Failed to validate micro URI format: Resource: ID does not fit within the 16 bits allotted"
+        );
+    }
+
+    #[test]
+    fn test_serialize_uri_overflow_entity_id() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(0x10000),
+                version_major: Some(254),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let uprotocol_uri = MicroUriSerializer::serialize(&uri);
+        assert!(uprotocol_uri.is_err());
+        assert_eq!(
+            uprotocol_uri.unwrap_err().to_string(),
+            "Failed to validate micro URI format: Entity: ID does not fit within the 16 bits allotted"
+        );
+    }
+
+    #[test]
+    fn test_serialize_version_overflow_entity_version() {
+        let uri = UUri {
+            entity: Some(UEntity {
+                id: Some(29999),
+                version_major: Some(0x100),
+                ..Default::default()
+            }),
+            resource: Some(UResource {
+                id: Some(29999),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let uprotocol_uri = MicroUriSerializer::serialize(&uri);
+        assert!(uprotocol_uri.is_err());
+        assert_eq!(
+            uprotocol_uri.unwrap_err().to_string(),
+            "Failed to validate micro URI format: Entity: Major version does not fit within the 8 bits allotted"
+        );
     }
 }
