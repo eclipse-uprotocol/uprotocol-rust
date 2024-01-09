@@ -40,6 +40,7 @@ bytes = "1.4"
 chrono = "0.4"
 cloudevents-sdk = { version = "0.7" }
 mac_address = "1.1"
+mime = "0.3"
 prost = "0.12"
 prost-types = "0.12"
 rand = "0.8"
